@@ -77,6 +77,44 @@ public extension Array {
             return (copy[0..<pivot], copy[pivot..<count])
     }
 
+    /// Group the elements in this array into a dictionary, keyed by applying the specified `transform` and discarding
+    /// elements for which that transform returns `nil`.
+    ///
+    /// - parameter transform: The transformation function to extract an element to its group key. Return `nil`
+    /// to exclude the element from the result.
+    ///
+    /// - returns: The elements grouped and filtered by applying the specified transformation.
+    func filterGroup<U: Hashable>(by transform: (Element) -> U?) -> [U: [Element]] {
+        var result = [U: [Element]]()
+        for element in self {
+            if let key = transform(element) {
+                result[key, default: []].append(element)
+            }
+        }
+        return result
+    }
+
+    /// Same as `filterGroup` but spreads the work in the `transform` block in parallel using GCD's `concurrentPerform`.
+    ///
+    /// - parameter transform: The transformation function to extract an element to its group key. Return `nil`
+    /// to exclude the element from the result.
+    ///
+    /// - returns: The elements grouped and filtered by applying the specified transformation.
+    func parallelFilterGroup<U: Hashable & Sendable>(by transform: @Sendable (Element) -> U?) ->
+        [U: [Element]] where Element: Sendable {
+        if count < 16 {
+            return filterGroup(by: transform)
+        }
+        let pivot = count / 2
+        let results = [
+            Array(self[0..<pivot]),
+            Array(self[pivot...]),
+        ].parallelMap { subarray in
+            subarray.parallelFilterGroup(by: transform)
+        }
+        return results[0].merging(results[1], uniquingKeysWith: +)
+    }
+
     /// Same as `flatMap` but spreads the work in the `transform` block in parallel using GCD's `concurrentPerform`.
     ///
     /// - parameter transform: The transformation to apply to each element.
